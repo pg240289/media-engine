@@ -276,7 +276,9 @@ class QueryRouter:
         # Determine comparison dimension
         comparison_type = entities.get('comparison_type')
 
-        if comparison_type == 'geo' or geos:
+        if comparison_type == 'client':
+            dimension = 'client'
+        elif comparison_type == 'geo' or geos:
             dimension = 'geo'
         elif comparison_type == 'ad_type':
             dimension = 'ad_type'
@@ -407,7 +409,7 @@ class QueryRouter:
         geos: Optional[List[str]],
         entities: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Run simple lookup analysis"""
+        """Run simple lookup analysis with comprehensive breakdowns"""
         summary = self.analytics.get_summary_metrics(
             start_date=date_ranges['current_start'],
             end_date=date_ranges['current_end'],
@@ -415,9 +417,27 @@ class QueryRouter:
             geos=geos,
         )
 
-        # Add breakdowns
+        # Add platform breakdown
         platform_breakdown = self.analytics.get_breakdown_by_dimension(
             dimension='platform',
+            start_date=date_ranges['current_start'],
+            end_date=date_ranges['current_end'],
+            platforms=platforms,
+            geos=geos,
+        )
+
+        # Add client breakdown - critical for client-related questions
+        client_breakdown = self.analytics.get_breakdown_by_dimension(
+            dimension='client',
+            start_date=date_ranges['current_start'],
+            end_date=date_ranges['current_end'],
+            platforms=platforms,
+            geos=geos,
+        )
+
+        # Add geo breakdown
+        geo_breakdown = self.analytics.get_breakdown_by_dimension(
+            dimension='geo',
             start_date=date_ranges['current_start'],
             end_date=date_ranges['current_end'],
             platforms=platforms,
@@ -427,6 +447,8 @@ class QueryRouter:
         return {
             'summary': summary,
             'platform_breakdown': platform_breakdown.to_dict('records') if len(platform_breakdown) > 0 else [],
+            'client_breakdown': client_breakdown.to_dict('records') if len(client_breakdown) > 0 else [],
+            'geo_breakdown': geo_breakdown.to_dict('records') if len(geo_breakdown) > 0 else [],
             'period': date_ranges,
         }
 
@@ -436,7 +458,7 @@ class QueryRouter:
         platforms: Optional[List[str]],
         geos: Optional[List[str]],
     ) -> Dict[str, Any]:
-        """Run general analysis for unclassified questions"""
+        """Run general analysis for unclassified questions with comprehensive breakdowns"""
         summary = self.analytics.get_summary_metrics(
             start_date=date_ranges['current_start'],
             end_date=date_ranges['current_end'],
@@ -453,9 +475,29 @@ class QueryRouter:
             geos=geos,
         )
 
+        # Add client breakdown for client-related questions
+        client_breakdown = self.analytics.get_breakdown_by_dimension(
+            dimension='client',
+            start_date=date_ranges['current_start'],
+            end_date=date_ranges['current_end'],
+            platforms=platforms,
+            geos=geos,
+        )
+
+        # Add platform breakdown
+        platform_breakdown = self.analytics.get_breakdown_by_dimension(
+            dimension='platform',
+            start_date=date_ranges['current_start'],
+            end_date=date_ranges['current_end'],
+            platforms=platforms,
+            geos=geos,
+        )
+
         return {
             'summary': summary,
             'diagnostic': diagnostic,
+            'client_breakdown': client_breakdown.to_dict('records') if len(client_breakdown) > 0 else [],
+            'platform_breakdown': platform_breakdown.to_dict('records') if len(platform_breakdown) > 0 else [],
             'period': date_ranges,
         }
 

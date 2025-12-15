@@ -393,7 +393,9 @@ Extract and return as JSON:
     "geos": [list of mentioned geos or empty],
     "metrics": [list of mentioned metrics like CPA, ROAS, conversions, spend],
     "time_reference": "this week" | "last week" | "last month" | null,
-    "comparison_type": "wow" | "platform" | "geo" | "ad_type" | null
+    "comparison_type": "wow" | "platform" | "geo" | "ad_type" | "client" | null
 }}
+
+IMPORTANT: If the question mentions "client", "clients", "account", "accounts", "advertiser", or "brand", set comparison_type to "client".
 
 Only include entities explicitly mentioned or clearly implied. Return valid JSON only."""
