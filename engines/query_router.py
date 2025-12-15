@@ -212,40 +212,53 @@ class QueryRouter:
         platforms = entities.get('platforms') or None
         geos = entities.get('geos') or None
 
-        if intent == 'diagnostic':
-            return self._run_diagnostic_analysis(
-                date_ranges, platforms, geos
-            )
+        try:
+            if intent == 'diagnostic':
+                return self._run_diagnostic_analysis(
+                    date_ranges, platforms, geos
+                )
 
-        elif intent == 'comparison':
-            return self._run_comparison_analysis(
-                date_ranges, platforms, geos, entities
-            )
+            elif intent == 'comparison':
+                return self._run_comparison_analysis(
+                    date_ranges, platforms, geos, entities
+                )
 
-        elif intent == 'forecast':
-            return self._run_forecast_analysis(
-                platforms, geos, entities
-            )
+            elif intent == 'forecast':
+                return self._run_forecast_analysis(
+                    platforms, geos, entities
+                )
 
-        elif intent == 'scenario':
-            return self._run_scenario_analysis(
-                user_question, platforms, geos
-            )
+            elif intent == 'scenario':
+                return self._run_scenario_analysis(
+                    user_question, platforms, geos
+                )
 
-        elif intent == 'recommendation':
-            return self._run_recommendation_analysis(
-                platforms, geos
-            )
+            elif intent == 'recommendation':
+                return self._run_recommendation_analysis(
+                    platforms, geos
+                )
 
-        elif intent == 'lookup':
-            return self._run_lookup_analysis(
-                date_ranges, platforms, geos, entities
-            )
+            elif intent == 'lookup':
+                return self._run_lookup_analysis(
+                    date_ranges, platforms, geos, entities
+                )
 
-        else:  # general
-            return self._run_general_analysis(
-                date_ranges, platforms, geos
-            )
+            else:  # general
+                return self._run_general_analysis(
+                    date_ranges, platforms, geos
+                )
+        except Exception as e:
+            # Return a minimal analysis result with error info
+            return {
+                'error': str(e),
+                'summary': self.analytics.get_summary_metrics(
+                    start_date=date_ranges['current_start'],
+                    end_date=date_ranges['current_end'],
+                    platforms=platforms,
+                    geos=geos,
+                ),
+                'period': date_ranges,
+            }
 
     def _run_diagnostic_analysis(
         self,
@@ -276,11 +289,12 @@ class QueryRouter:
         # Determine comparison dimension
         comparison_type = entities.get('comparison_type')
 
-        if comparison_type == 'client':
+        # Check which dimension to use, falling back to platform if requested dimension doesn't exist
+        if comparison_type == 'client' and 'client' in self.df.columns:
             dimension = 'client'
         elif comparison_type == 'geo' or geos:
             dimension = 'geo'
-        elif comparison_type == 'ad_type':
+        elif comparison_type == 'ad_type' and 'ad_type' in self.df.columns:
             dimension = 'ad_type'
         else:
             dimension = 'platform'
@@ -417,40 +431,45 @@ class QueryRouter:
             geos=geos,
         )
 
-        # Add platform breakdown
-        platform_breakdown = self.analytics.get_breakdown_by_dimension(
-            dimension='platform',
-            start_date=date_ranges['current_start'],
-            end_date=date_ranges['current_end'],
-            platforms=platforms,
-            geos=geos,
-        )
-
-        # Add client breakdown - critical for client-related questions
-        client_breakdown = self.analytics.get_breakdown_by_dimension(
-            dimension='client',
-            start_date=date_ranges['current_start'],
-            end_date=date_ranges['current_end'],
-            platforms=platforms,
-            geos=geos,
-        )
-
-        # Add geo breakdown
-        geo_breakdown = self.analytics.get_breakdown_by_dimension(
-            dimension='geo',
-            start_date=date_ranges['current_start'],
-            end_date=date_ranges['current_end'],
-            platforms=platforms,
-            geos=geos,
-        )
-
-        return {
+        result = {
             'summary': summary,
-            'platform_breakdown': platform_breakdown.to_dict('records') if len(platform_breakdown) > 0 else [],
-            'client_breakdown': client_breakdown.to_dict('records') if len(client_breakdown) > 0 else [],
-            'geo_breakdown': geo_breakdown.to_dict('records') if len(geo_breakdown) > 0 else [],
             'period': date_ranges,
         }
+
+        # Add platform breakdown
+        if 'platform' in self.df.columns:
+            platform_breakdown = self.analytics.get_breakdown_by_dimension(
+                dimension='platform',
+                start_date=date_ranges['current_start'],
+                end_date=date_ranges['current_end'],
+                platforms=platforms,
+                geos=geos,
+            )
+            result['platform_breakdown'] = platform_breakdown.to_dict('records') if len(platform_breakdown) > 0 else []
+
+        # Add client breakdown - critical for client-related questions
+        if 'client' in self.df.columns:
+            client_breakdown = self.analytics.get_breakdown_by_dimension(
+                dimension='client',
+                start_date=date_ranges['current_start'],
+                end_date=date_ranges['current_end'],
+                platforms=platforms,
+                geos=geos,
+            )
+            result['client_breakdown'] = client_breakdown.to_dict('records') if len(client_breakdown) > 0 else []
+
+        # Add geo breakdown
+        if 'geo' in self.df.columns:
+            geo_breakdown = self.analytics.get_breakdown_by_dimension(
+                dimension='geo',
+                start_date=date_ranges['current_start'],
+                end_date=date_ranges['current_end'],
+                platforms=platforms,
+                geos=geos,
+            )
+            result['geo_breakdown'] = geo_breakdown.to_dict('records') if len(geo_breakdown) > 0 else []
+
+        return result
 
     def _run_general_analysis(
         self,
@@ -475,31 +494,35 @@ class QueryRouter:
             geos=geos,
         )
 
-        # Add client breakdown for client-related questions
-        client_breakdown = self.analytics.get_breakdown_by_dimension(
-            dimension='client',
-            start_date=date_ranges['current_start'],
-            end_date=date_ranges['current_end'],
-            platforms=platforms,
-            geos=geos,
-        )
-
-        # Add platform breakdown
-        platform_breakdown = self.analytics.get_breakdown_by_dimension(
-            dimension='platform',
-            start_date=date_ranges['current_start'],
-            end_date=date_ranges['current_end'],
-            platforms=platforms,
-            geos=geos,
-        )
-
-        return {
+        result = {
             'summary': summary,
             'diagnostic': diagnostic,
-            'client_breakdown': client_breakdown.to_dict('records') if len(client_breakdown) > 0 else [],
-            'platform_breakdown': platform_breakdown.to_dict('records') if len(platform_breakdown) > 0 else [],
             'period': date_ranges,
         }
+
+        # Add client breakdown for client-related questions (if column exists)
+        if 'client' in self.df.columns:
+            client_breakdown = self.analytics.get_breakdown_by_dimension(
+                dimension='client',
+                start_date=date_ranges['current_start'],
+                end_date=date_ranges['current_end'],
+                platforms=platforms,
+                geos=geos,
+            )
+            result['client_breakdown'] = client_breakdown.to_dict('records') if len(client_breakdown) > 0 else []
+
+        # Add platform breakdown (if column exists)
+        if 'platform' in self.df.columns:
+            platform_breakdown = self.analytics.get_breakdown_by_dimension(
+                dimension='platform',
+                start_date=date_ranges['current_start'],
+                end_date=date_ranges['current_end'],
+                platforms=platforms,
+                geos=geos,
+            )
+            result['platform_breakdown'] = platform_breakdown.to_dict('records') if len(platform_breakdown) > 0 else []
+
+        return result
 
     def _get_visualization_hint(
         self,

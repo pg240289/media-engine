@@ -136,7 +136,7 @@ class AnalyticsEngine:
         include_totals: bool = True,
     ) -> pd.DataFrame:
         """
-        Get metrics broken down by a dimension (platform, ad_type, geo, campaign_name)
+        Get metrics broken down by a dimension (platform, ad_type, geo, campaign_name, client)
 
         Args:
             dimension: Column to group by
@@ -148,6 +148,10 @@ class AnalyticsEngine:
         filtered = self._filter_data(start_date, end_date, platforms, geos)
 
         if len(filtered) == 0:
+            return pd.DataFrame()
+
+        # Validate dimension column exists
+        if dimension not in filtered.columns:
             return pd.DataFrame()
 
         # Aggregate by dimension
@@ -280,6 +284,10 @@ class AnalyticsEngine:
         Returns:
             DataFrame with current, previous, and delta columns
         """
+        # Validate dimension exists in data
+        if dimension not in self.df.columns:
+            return pd.DataFrame()
+
         # Current period
         current_df = self._filter_data(current_start, current_end, platforms, geos)
         current_breakdown = self.get_breakdown_by_dimension(
@@ -291,6 +299,16 @@ class AnalyticsEngine:
         previous_breakdown = self.get_breakdown_by_dimension(
             dimension, previous_start, previous_end, platforms, geos, include_totals=False
         )
+
+        # If either breakdown is empty, return empty DataFrame
+        if len(current_breakdown) == 0 and len(previous_breakdown) == 0:
+            return pd.DataFrame()
+
+        # If one is empty, just return the other with appropriate suffixes
+        if len(current_breakdown) == 0:
+            return previous_breakdown
+        if len(previous_breakdown) == 0:
+            return current_breakdown
 
         # Merge
         merged = current_breakdown.merge(
