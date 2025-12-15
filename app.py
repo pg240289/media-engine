@@ -1440,35 +1440,27 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
             intent_color = intent_colors.get(intent, '#6366F1')
             intent_label = intent_labels.get(intent, '💬 Response')
 
-            # Use st.container for better markdown rendering
-            with st.container():
-                # Intent badge
-                st.markdown(f"""
-                <div style="margin-bottom: 8px;">
-                    <span style="background: {intent_color}20;
-                                 color: {intent_color};
-                                 padding: 4px 12px;
-                                 border-radius: 12px;
-                                 font-size: 12px;
-                                 font-weight: 600;
-                                 border: 1px solid {intent_color}40;">
-                        {intent_label}
-                    </span>
-                </div>
-                """, unsafe_allow_html=True)
+            # AI Response - Using Streamlit's native container with border
+            st.markdown(f"""
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                <span style="background: {intent_color}15;
+                             color: {intent_color};
+                             padding: 5px 12px;
+                             border-radius: 16px;
+                             font-size: 12px;
+                             font-weight: 600;
+                             border: 1px solid {intent_color}30;">
+                    {intent_label}
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
 
-                # AI response in a styled container - use native markdown for better formatting
-                st.markdown(f"""
-                <div style="background: linear-gradient(135deg, #1E1E2E 0%, #1A1A2A 100%);
-                            border: 1px solid #333344;
-                            border-left: 4px solid {intent_color};
-                            padding: 20px 24px;
-                            border-radius: 4px 16px 16px 16px;
-                            margin-bottom: 24px;
-                            box-shadow: 0 4px 16px rgba(0,0,0,0.2);">
-                    <div style="font-size: 14px; color: #E5E7EB; line-height: 1.9; white-space: pre-wrap;">{turn['answer']}</div>
-                </div>
-                """, unsafe_allow_html=True)
+            # Use st.container with border for the response
+            with st.container(border=True):
+                st.markdown(turn['answer'])
+
+            # Add spacing after the response
+            st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
 
             # Show visualization for forecasts
             if intent == 'forecast' and turn.get('analysis', {}).get('projection'):
