@@ -270,12 +270,29 @@ class MockLLMExplainer:
         platforms = [p for p in available_platforms if p.lower() in q]
         geos = [g for g in available_geos if g.lower() in q]
 
+        # Determine comparison type based on keywords
+        comparison_type = None
+        if any(w in q for w in ['campaign', 'campaigns']):
+            comparison_type = 'campaign'
+        elif any(w in q for w in ['client', 'clients', 'account', 'accounts', 'advertiser', 'brand']):
+            comparison_type = 'client'
+        elif any(w in q for w in ['creative', 'creatives']):
+            comparison_type = 'creative'
+        elif any(w in q for w in ['objective', 'objectives', 'goal']):
+            comparison_type = 'objective'
+        elif any(w in q for w in ['ad type', 'ad types', 'format']):
+            comparison_type = 'ad_type'
+        elif any(w in q for w in ['geo', 'geography', 'region', 'state', 'location']):
+            comparison_type = 'geo'
+        elif any(w in q for w in ['platform', 'platforms', 'google', 'meta', 'amazon', 'dv360']):
+            comparison_type = 'platform'
+
         return {
             'platforms': platforms,
             'geos': geos,
             'metrics': [],
             'time_reference': 'this week' if 'this week' in q else 'last week' if 'last week' in q else None,
-            'comparison_type': None,
+            'comparison_type': comparison_type,
         }
 
     def _mock_diagnostic(self, data: Dict) -> str:

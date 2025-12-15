@@ -207,46 +207,20 @@ class QueryRouter:
         date_ranges: Dict[str, str],
         user_question: str,
     ) -> Dict[str, Any]:
-        """Run the appropriate analysis based on intent"""
+        """
+        Run COMPREHENSIVE analysis - gather all relevant data and let LLM decide what to use.
 
+        This approach eliminates brittle routing logic by always providing rich context.
+        The LLM will select the relevant data based on the user's actual question.
+        """
         platforms = entities.get('platforms') or None
         geos = entities.get('geos') or None
 
         try:
-            if intent == 'diagnostic':
-                return self._run_diagnostic_analysis(
-                    date_ranges, platforms, geos
-                )
-
-            elif intent == 'comparison':
-                return self._run_comparison_analysis(
-                    date_ranges, platforms, geos, entities
-                )
-
-            elif intent == 'forecast':
-                return self._run_forecast_analysis(
-                    platforms, geos, entities
-                )
-
-            elif intent == 'scenario':
-                return self._run_scenario_analysis(
-                    user_question, platforms, geos
-                )
-
-            elif intent == 'recommendation':
-                return self._run_recommendation_analysis(
-                    platforms, geos
-                )
-
-            elif intent == 'lookup':
-                return self._run_lookup_analysis(
-                    date_ranges, platforms, geos, entities
-                )
-
-            else:  # general
-                return self._run_general_analysis(
-                    date_ranges, platforms, geos
-                )
+            # Always run comprehensive analysis regardless of intent
+            return self._run_comprehensive_analysis(
+                date_ranges, platforms, geos, user_question
+            )
         except Exception as e:
             # Return a minimal analysis result with error info
             return {
@@ -259,6 +233,102 @@ class QueryRouter:
                 ),
                 'period': date_ranges,
             }
+
+    def _run_comprehensive_analysis(
+        self,
+        date_ranges: Dict,
+        platforms: Optional[List[str]],
+        geos: Optional[List[str]],
+        user_question: str,
+    ) -> Dict[str, Any]:
+        """
+        Gather ALL available breakdowns and metrics.
+        Let the LLM decide what's relevant based on the question.
+        """
+        result = {
+            'period': date_ranges,
+            'user_question': user_question,
+        }
+
+        # 1. Overall summary metrics
+        result['summary'] = self.analytics.get_summary_metrics(
+            start_date=date_ranges['current_start'],
+            end_date=date_ranges['current_end'],
+            platforms=platforms,
+            geos=geos,
+        )
+
+        # 2. Period-over-period comparison (diagnostic data)
+        try:
+            diagnostic = self.diagnostics.analyze_period_change(
+                current_start=date_ranges['current_start'],
+                current_end=date_ranges['current_end'],
+                previous_start=date_ranges['previous_start'],
+                previous_end=date_ranges['previous_end'],
+                platforms=platforms,
+                geos=geos,
+            )
+            result['period_comparison'] = diagnostic
+        except Exception:
+            pass
+
+        # 3. Breakdowns by ALL available dimensions
+        dimensions_to_try = [
+            ('platform', 'platform_breakdown'),
+            ('campaign_name', 'campaign_breakdown'),
+            ('client', 'client_breakdown'),
+            ('geo', 'geo_breakdown'),
+            ('ad_type', 'ad_type_breakdown'),
+            ('objective', 'objective_breakdown'),
+            ('creative_type', 'creative_breakdown'),
+        ]
+
+        for column, result_key in dimensions_to_try:
+            if column in self.df.columns:
+                try:
+                    breakdown = self.analytics.get_breakdown_by_dimension(
+                        dimension=column,
+                        start_date=date_ranges['current_start'],
+                        end_date=date_ranges['current_end'],
+                        platforms=platforms,
+                        geos=geos,
+                    )
+                    if len(breakdown) > 0:
+                        # Limit to top 15 to avoid token bloat
+                        result[result_key] = breakdown.head(15).to_dict('records')
+                except Exception:
+                    pass
+
+        # 4. Time series for trends (if forecasting might be relevant)
+        try:
+            time_series = self.analytics.get_time_series(
+                metric='conversions',
+                granularity='daily',
+                start_date=date_ranges['current_start'],
+                end_date=date_ranges['current_end'],
+                platforms=platforms,
+                geos=geos,
+            )
+            if len(time_series) > 0:
+                result['daily_trend'] = time_series.tail(14).to_dict('records')
+        except Exception:
+            pass
+
+        # 5. Top/bottom performers summary
+        try:
+            # Find best and worst by CPA
+            if 'campaign_breakdown' in result and result['campaign_breakdown']:
+                campaigns = result['campaign_breakdown']
+                campaigns_with_spend = [c for c in campaigns if c.get('spend', 0) > 0 and c.get('conversions', 0) > 0]
+                if campaigns_with_spend:
+                    best_cpa = min(campaigns_with_spend, key=lambda x: x.get('cpa', float('inf')))
+                    worst_cpa = max(campaigns_with_spend, key=lambda x: x.get('cpa', 0))
+                    result['best_campaign_by_cpa'] = best_cpa
+                    result['worst_campaign_by_cpa'] = worst_cpa
+        except Exception:
+            pass
+
+        return result
 
     def _run_diagnostic_analysis(
         self,
@@ -289,15 +359,29 @@ class QueryRouter:
         # Determine comparison dimension
         comparison_type = entities.get('comparison_type')
 
-        # Check which dimension to use, falling back to platform if requested dimension doesn't exist
-        if comparison_type == 'client' and 'client' in self.df.columns:
-            dimension = 'client'
+        # Map comparison_type to actual column name, with validation
+        dimension_mapping = {
+            'campaign': 'campaign_name',
+            'client': 'client',
+            'geo': 'geo',
+            'ad_type': 'ad_type',
+            'creative': 'creative_type',
+            'objective': 'objective',
+            'platform': 'platform',
+        }
+
+        # Determine dimension based on comparison_type
+        dimension = 'platform'  # default fallback
+
+        if comparison_type and comparison_type in dimension_mapping:
+            mapped_column = dimension_mapping[comparison_type]
+            if mapped_column in self.df.columns:
+                dimension = mapped_column
+            else:
+                # Column doesn't exist, fall back to platform
+                dimension = 'platform'
         elif comparison_type == 'geo' or geos:
             dimension = 'geo'
-        elif comparison_type == 'ad_type' and 'ad_type' in self.df.columns:
-            dimension = 'ad_type'
-        else:
-            dimension = 'platform'
 
         breakdown = self.analytics.get_breakdown_by_dimension(
             dimension=dimension,

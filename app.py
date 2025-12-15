@@ -1275,241 +1275,74 @@ def render_diagnostics(diagnostics: DiagnosticsEngine, filters: dict):
 
 
 def render_ask_platform(query_router: QueryRouter, filters: dict):
-    """Render Ask AI section - Conversational chat interface with history"""
+    """Render Ask AI section - Clean conversational chat interface"""
 
     # Initialize session state for conversation history
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
+    if 'chat_messages' not in st.session_state:
+        st.session_state.chat_messages = []
 
-    # ═══════════════════════════════════════════════════════════════
-    # HEADER
-    # ═══════════════════════════════════════════════════════════════
+    # Header
+    st.markdown("### 💬 Ask AI")
+    st.caption("Ask questions about your campaign performance in natural language.")
 
-    st.markdown("### 🤖 AI Analytics Assistant")
-    st.caption("Have a conversation about your campaign performance. Ask follow-up questions to dive deeper.")
+    # Clear chat button in header
+    if st.session_state.chat_messages:
+        col1, col2 = st.columns([5, 1])
+        with col2:
+            if st.button("🗑️ Clear", use_container_width=True):
+                st.session_state.chat_messages = []
+                st.rerun()
 
-    # Show any error from processing
-    if 'chat_error' in st.session_state and st.session_state.chat_error:
-        st.error(f"Error processing question: {st.session_state.chat_error}")
-        st.session_state.chat_error = None
+    st.markdown("---")
 
-    # ═══════════════════════════════════════════════════════════════
-    # CHAT INPUT AT TOP
-    # ═══════════════════════════════════════════════════════════════
+    # Display chat history using Streamlit's native chat components
+    for message in st.session_state.chat_messages:
+        with st.chat_message(message["role"], avatar="🧑‍💼" if message["role"] == "user" else "🤖"):
+            st.markdown(message["content"])
 
-    col_input, col_btn = st.columns([5, 1])
-    with col_input:
-        user_input = st.text_input(
-            "Ask a question",
-            placeholder="Ask about your campaign performance...",
-            key="ask_input",
-            label_visibility="collapsed"
-        )
-    with col_btn:
-        submit_btn = st.button("Ask →", key="ask_submit", use_container_width=True, type="primary")
+    # Chat input at the bottom
+    if prompt := st.chat_input("Ask about campaigns, platforms, performance..."):
+        # Add user message to chat
+        st.session_state.chat_messages.append({"role": "user", "content": prompt})
 
-    # Handle question submission - queue for processing and rerun
-    if submit_btn and user_input:
-        st.session_state.pending_question = user_input
-        st.rerun()
+        # Display user message immediately
+        with st.chat_message("user", avatar="🧑‍💼"):
+            st.markdown(prompt)
 
-    # ═══════════════════════════════════════════════════════════════
-    # QUICK QUESTIONS
-    # ═══════════════════════════════════════════════════════════════
+        # Generate AI response
+        with st.chat_message("assistant", avatar="🤖"):
+            with st.spinner("Analyzing..."):
+                try:
+                    # Build conversation history for context
+                    conversation_history = []
+                    for msg in st.session_state.chat_messages[-6:-1]:  # Last 5 messages before current
+                        if msg["role"] == "user":
+                            conversation_history.append({
+                                'question': msg["content"],
+                                'answer_summary': ''
+                            })
+                        elif msg["role"] == "assistant" and conversation_history:
+                            conversation_history[-1]['answer_summary'] = msg["content"][:300]
 
-    question_categories = {
-        "🔍 Diagnostics": [
-            "Why did CPA change this week?",
-            "What's driving performance changes?",
-            "Why is conversion rate dropping?",
-        ],
-        "📊 Comparison": [
-            "Which platform has the best ROAS?",
-            "Compare Google Ads vs Meta",
-            "Which geo is performing best?",
-        ],
-        "📈 Forecasting": [
-            "What's the conversion trend?",
-            "Predict next week's performance",
-            "How will CPA trend next week?",
-        ],
-        "💡 Recommendations": [
-            "Should I reallocate budget?",
-            "Where should I increase spend?",
-            "How can I improve ROAS?",
-        ],
-    }
+                    # Process the question
+                    result = query_router.process_query(
+                        user_question=prompt,
+                        filters=filters,
+                        conversation_history=conversation_history if conversation_history else None
+                    )
 
-    has_history = len(st.session_state.chat_history) > 0
+                    response = result.get('explanation', 'I was unable to analyze your question. Please try rephrasing.')
 
-    with st.expander("💬 Quick Start Questions", expanded=not has_history):
-        q_tabs = st.tabs(list(question_categories.keys()))
-        for tab_idx, (tab, (category, questions)) in enumerate(zip(q_tabs, question_categories.items())):
-            with tab:
-                cols = st.columns(3)
-                for i, q in enumerate(questions):
-                    with cols[i % 3]:
-                        if st.button(q, key=f"quick_{tab_idx}_{i}", use_container_width=True):
-                            st.session_state.pending_question = q
-                            st.rerun()
+                    # Display response
+                    st.markdown(response)
 
-    # ═══════════════════════════════════════════════════════════════
-    # CONVERSATION HISTORY DISPLAY
-    # ═══════════════════════════════════════════════════════════════
+                    # Add assistant message to chat history
+                    st.session_state.chat_messages.append({"role": "assistant", "content": response})
 
-    # Refresh has_history after potential new addition
-    has_history = len(st.session_state.chat_history) > 0
-
-    if has_history:
-        # Clear conversation button
-        col1, col2, col3 = st.columns([1, 3, 1])
-        with col3:
-            if st.button("🗑️ Clear Chat", use_container_width=True):
-                st.session_state.chat_history = []
-                st.session_state.last_input = None
-
-        st.markdown("---")
-
-        # Display conversation history with improved UI
-        for idx, turn in enumerate(st.session_state.chat_history):
-            # User question bubble - right aligned
-            st.markdown(f"""
-            <div style="display: flex; justify-content: flex-end; margin-bottom: 16px;">
-                <div style="background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
-                            color: white;
-                            padding: 14px 20px;
-                            border-radius: 20px 20px 6px 20px;
-                            max-width: 70%;
-                            font-size: 15px;
-                            font-weight: 500;
-                            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);">
-                    {turn['question']}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # AI response with intent badge
-            intent = turn.get('intent', 'general')
-            intent_colors = {
-                'diagnostic': '#EF4444', 'comparison': '#3B82F6', 'forecast': '#F59E0B',
-                'scenario': '#8B5CF6', 'recommendation': '#10B981', 'lookup': '#6B7280', 'general': '#6366F1',
-            }
-            intent_labels = {
-                'diagnostic': '🔍 Diagnostic', 'comparison': '📊 Comparison', 'forecast': '📈 Forecast',
-                'scenario': '🎯 Scenario', 'recommendation': '💡 Recommendation', 'lookup': '📋 Lookup', 'general': '💬 Response',
-            }
-            intent_color = intent_colors.get(intent, '#6366F1')
-            intent_label = intent_labels.get(intent, '💬 Response')
-
-            # AI Response - Using Streamlit's native container with border
-            st.markdown(f"""
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                <span style="background: {intent_color}15;
-                             color: {intent_color};
-                             padding: 5px 12px;
-                             border-radius: 16px;
-                             font-size: 12px;
-                             font-weight: 600;
-                             border: 1px solid {intent_color}30;">
-                    {intent_label}
-                </span>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Use st.container with border for the response
-            with st.container(border=True):
-                st.markdown(turn['answer'])
-
-            # Add spacing after the response
-            st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
-
-            # Show visualization for forecasts
-            if intent == 'forecast' and turn.get('analysis', {}).get('projection'):
-                proj = turn['analysis']
-                if proj.get('historical', {}).get('dates'):
-                    with st.container():
-                        hist_df = pd.DataFrame({
-                            'period': proj['historical']['dates'],
-                            proj['metric']: proj['historical']['values']
-                        })
-                        projection_data = {
-                            'dates': proj['projection']['dates'],
-                            'values': proj['projection']['values'],
-                            'lower_bound': proj['projection'].get('lower_bound', []),
-                            'upper_bound': proj['projection'].get('upper_bound', []),
-                        }
-                        fig = create_trend_chart(
-                            hist_df, x_col='period', y_col=proj['metric'],
-                            title=f"{proj['metric'].upper()} Trend & Projection",
-                            show_projection=True, projection_data=projection_data
-                        )
-                        st.plotly_chart(fig, use_container_width=True, key=f"chart_{idx}")
-
-            # Show comparison table
-            elif intent == 'comparison' and turn.get('analysis', {}).get('breakdown'):
-                breakdown = turn['analysis']['breakdown']
-                if len(breakdown) > 0:
-                    with st.expander("📊 View Detailed Data", expanded=False):
-                        df = pd.DataFrame(breakdown)
-                        if 'spend' in df.columns:
-                            df['Spend'] = df['spend'].apply(lambda x: format_inr(x))
-                        if 'cpa' in df.columns:
-                            df['CPA'] = df['cpa'].apply(lambda x: format_inr(x))
-                        if 'roas' in df.columns:
-                            df['ROAS'] = df['roas'].apply(lambda x: f"{x:.2f}x")
-                        st.dataframe(df, use_container_width=True, hide_index=True)
-
-    # ═══════════════════════════════════════════════════════════════
-    # SUGGESTED FOLLOW-UPS (contextual based on last response)
-    # ═══════════════════════════════════════════════════════════════
-
-    if has_history:
-        last_intent = st.session_state.chat_history[-1].get('intent', 'general')
-
-        # Contextual follow-up suggestions based on last question type
-        follow_up_suggestions = {
-            'diagnostic': [
-                "What specific actions should I take?",
-                "Which platform should I focus on first?",
-                "How does this compare to last month?",
-            ],
-            'comparison': [
-                "Why is the winner performing better?",
-                "Should I shift budget to the best performer?",
-                "What's the trend for each platform?",
-            ],
-            'forecast': [
-                "What could change this projection?",
-                "How confident is this forecast?",
-                "What should I do to improve the outlook?",
-            ],
-            'recommendation': [
-                "What's the risk of this recommendation?",
-                "How much budget should I shift?",
-                "What results should I expect?",
-            ],
-            'lookup': [
-                "How does this compare to last week?",
-                "Break this down by platform",
-                "What's driving this number?",
-            ],
-            'general': [
-                "Tell me more about this",
-                "What should I do next?",
-                "What are the key takeaways?",
-            ],
-        }
-
-        suggestions = follow_up_suggestions.get(last_intent, follow_up_suggestions['general'])
-
-        st.markdown("---")
-        st.markdown("**💡 Suggested follow-ups:**")
-        cols = st.columns(3)
-        for idx, suggestion in enumerate(suggestions):
-            with cols[idx]:
-                if st.button(suggestion, key=f"followup_{idx}", use_container_width=True):
-                    st.session_state.pending_question = suggestion
-                    st.rerun()
+                except Exception as e:
+                    error_msg = f"Sorry, I encountered an error: {str(e)}"
+                    st.error(error_msg)
+                    st.session_state.chat_messages.append({"role": "assistant", "content": error_msg})
 
 
 
@@ -1952,81 +1785,92 @@ def main():
     )
 
     # ═══════════════════════════════════════════════════════════════
-    # PROCESS PENDING AI QUESTION BEFORE RENDERING TABS
-    # This ensures the question is processed before any UI is rendered
+    # VIEW SELECTOR - Ask AI vs Dashboard tabs
     # ═══════════════════════════════════════════════════════════════
-    if 'pending_question' in st.session_state and st.session_state.pending_question:
-        question = st.session_state.pending_question
-        st.session_state.pending_question = None  # Clear immediately
 
-        # Initialize chat history if needed
-        if 'chat_history' not in st.session_state:
-            st.session_state.chat_history = []
+    # Initialize view state
+    if 'current_view' not in st.session_state:
+        st.session_state.current_view = 'dashboard'
 
-        # Build conversation history for context
-        conversation_history = [
-            {
-                'question': turn['question'],
-                'answer_summary': turn['answer'][:500] if len(turn['answer']) > 500 else turn['answer']
-            }
-            for turn in st.session_state.chat_history[-5:]
-        ]
+    is_dashboard = st.session_state.current_view == 'dashboard'
+    is_ask_ai = st.session_state.current_view == 'ask_ai'
 
-        try:
-            # Process the question
-            result = query_router.process_query(
-                user_question=question,
-                filters=filters,
-                conversation_history=conversation_history
-            )
+    # Render view selector with visual distinction
+    col_view1, col_view2, col_spacer = st.columns([1, 1, 4])
 
-            # Add to chat history
-            st.session_state.chat_history.append({
-                'question': question,
-                'answer': result.get('explanation', 'Analysis complete.'),
-                'intent': result.get('intent', 'general'),
-                'analysis': result.get('analysis', {}),
-            })
-        except Exception as e:
-            st.session_state.chat_error = str(e)
+    with col_view1:
+        # Dashboard button with visual state
+        if is_dashboard:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
+                        padding: 10px 20px; border-radius: 8px; text-align: center;
+                        color: white; font-weight: 600; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);">
+                📊 Dashboard
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            if st.button("📊 Dashboard", use_container_width=True, key="switch_to_dashboard"):
+                st.session_state.current_view = 'dashboard'
+                st.rerun()
 
-    # Main content tabs
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📈 Executive Summary",
-        "📊 Platform Analysis",
-        "🎯 Campaign Explorer",
-        "🎨 Creative Analysis",
-        "🔍 Diagnostics",
-        "💬 Ask AI"
-    ])
+    with col_view2:
+        # Ask AI button with visual state
+        if is_ask_ai:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+                        padding: 10px 20px; border-radius: 8px; text-align: center;
+                        color: white; font-weight: 600; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);">
+                💬 Ask AI
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            if st.button("💬 Ask AI", use_container_width=True, key="switch_to_ask_ai"):
+                st.session_state.current_view = 'ask_ai'
+                st.rerun()
 
-    with tab1:
-        render_executive_summary(analytics, diagnostics, filters)
-        st.markdown("---")
+    st.markdown("---")
 
-        # Trends - full width
-        render_trends(analytics, filters)
+    # ═══════════════════════════════════════════════════════════════
+    # RENDER CURRENT VIEW
+    # ═══════════════════════════════════════════════════════════════
 
-        st.markdown("---")
-
-        # Conversion Metrics - full width, horizontal layout
-        st.markdown("### 🎯 Conversion Metrics")
-        render_conversion_funnel(analytics, filters)
-
-    with tab2:
-        render_unified_view(analytics, filters)
-
-    with tab3:
-        render_campaign_explorer(analytics, filters)
-
-    with tab4:
-        render_creative_analysis(analytics, filters)
-
-    with tab5:
-        render_diagnostics(diagnostics, filters)
-
-    with tab6:
+    if st.session_state.current_view == 'ask_ai':
+        # Ask AI view - completely separate from dashboard tabs
         render_ask_platform(query_router, filters)
+    else:
+        # Dashboard view with tabs
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📈 Executive Summary",
+            "📊 Platform Analysis",
+            "🎯 Campaign Explorer",
+            "🎨 Creative Analysis",
+            "🔍 Diagnostics",
+        ])
+
+        with tab1:
+            render_executive_summary(analytics, diagnostics, filters)
+            st.markdown("---")
+
+            # Trends - full width
+            render_trends(analytics, filters)
+
+            st.markdown("---")
+
+            # Conversion Metrics - full width, horizontal layout
+            st.markdown("### 🎯 Conversion Metrics")
+            render_conversion_funnel(analytics, filters)
+
+        with tab2:
+            render_unified_view(analytics, filters)
+
+        with tab3:
+            render_campaign_explorer(analytics, filters)
+
+        with tab4:
+            render_creative_analysis(analytics, filters)
+
+        with tab5:
+            render_diagnostics(diagnostics, filters)
 
 
 if __name__ == "__main__":
