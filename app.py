@@ -1282,6 +1282,68 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
         st.session_state.chat_history = []  # List of {question, answer, intent, analysis_summary}
     if 'pending_question' not in st.session_state:
         st.session_state.pending_question = None
+    if 'ai_processing' not in st.session_state:
+        st.session_state.ai_processing = False
+
+    # ═══════════════════════════════════════════════════════════════
+    # PROCESS PENDING QUESTION FIRST (before any UI rendering)
+    # This ensures the processing happens immediately on rerun
+    # ═══════════════════════════════════════════════════════════════
+
+    if st.session_state.pending_question and not st.session_state.ai_processing:
+        st.session_state.ai_processing = True
+        question = st.session_state.pending_question
+        st.session_state.pending_question = None
+
+        # Show loading state with proper spacing
+        st.markdown("### 🤖 AI Analytics Assistant")
+        st.markdown("---")
+
+        # Show the question being processed
+        st.markdown(f"""
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
+            <div style="background: #3B82F6; color: white; padding: 12px 16px; border-radius: 16px 16px 4px 16px; max-width: 80%; font-size: 14px;">
+                {question}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Process with conversation history context
+        with st.spinner("🔍 Analyzing your data and generating insights..."):
+            try:
+                # Build conversation history for context
+                history_for_llm = [
+                    {
+                        'question': turn['question'],
+                        'answer_summary': turn['answer'][:500] if len(turn['answer']) > 500 else turn['answer'],
+                    }
+                    for turn in st.session_state.chat_history[-5:]  # Last 5 turns
+                ]
+
+                result = query_router.process_query(
+                    user_question=question,
+                    filters=filters,
+                    conversation_history=history_for_llm if history_for_llm else None
+                )
+
+                # Add to conversation history
+                st.session_state.chat_history.append({
+                    'question': question,
+                    'answer': result['explanation'],
+                    'intent': result['intent'],
+                    'analysis': result.get('analysis', {}),
+                })
+
+            except Exception as e:
+                st.session_state.chat_history.append({
+                    'question': question,
+                    'answer': f"I encountered an error while processing your question: {str(e)}. Please try rephrasing or ask a different question.",
+                    'intent': 'general',
+                    'analysis': {},
+                })
+
+        st.session_state.ai_processing = False
+        st.rerun()
 
     # ═══════════════════════════════════════════════════════════════
     # HEADER
@@ -1433,54 +1495,6 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
                         if 'roas' in df.columns:
                             df['ROAS'] = df['roas'].apply(lambda x: f"{x:.2f}x")
                         st.dataframe(df, use_container_width=True, hide_index=True)
-
-    # ═══════════════════════════════════════════════════════════════
-    # PROCESS PENDING QUESTION
-    # ═══════════════════════════════════════════════════════════════
-
-    if st.session_state.pending_question:
-        question = st.session_state.pending_question
-        st.session_state.pending_question = None
-
-        # Show the question being processed
-        st.markdown(f"""
-        <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
-            <div style="background: #3B82F6; color: white; padding: 12px 16px; border-radius: 16px 16px 4px 16px; max-width: 80%; font-size: 14px;">
-                {question}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Process with conversation history context
-        with st.spinner("🔍 Analyzing your data and considering conversation context..."):
-            try:
-                # Build conversation history for context
-                history_for_llm = [
-                    {
-                        'question': turn['question'],
-                        'answer_summary': turn['answer'][:500] if len(turn['answer']) > 500 else turn['answer'],
-                    }
-                    for turn in st.session_state.chat_history[-5:]  # Last 5 turns
-                ]
-
-                result = query_router.process_query(
-                    user_question=question,
-                    filters=filters,
-                    conversation_history=history_for_llm if history_for_llm else None
-                )
-
-                # Add to conversation history
-                st.session_state.chat_history.append({
-                    'question': question,
-                    'answer': result['explanation'],
-                    'intent': result['intent'],
-                    'analysis': result.get('analysis', {}),
-                })
-
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"Error processing question: {str(e)}")
 
     # ═══════════════════════════════════════════════════════════════
     # SUGGESTED FOLLOW-UPS (contextual based on last response)
