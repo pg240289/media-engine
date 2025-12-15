@@ -1275,308 +1275,280 @@ def render_diagnostics(diagnostics: DiagnosticsEngine, filters: dict):
 
 
 def render_ask_platform(query_router: QueryRouter, filters: dict):
-    """Render Ask AI section - Simple, functional Q&A interface"""
+    """Render Ask AI section - Conversational chat interface with history"""
 
-    # Initialize session state
-    if 'ai_response' not in st.session_state:
-        st.session_state.ai_response = None
-    if 'ai_query' not in st.session_state:
-        st.session_state.ai_query = ""
-    if 'ai_processing' not in st.session_state:
-        st.session_state.ai_processing = False
+    # Initialize session state for conversation history
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []  # List of {question, answer, intent, analysis_summary}
+    if 'pending_question' not in st.session_state:
+        st.session_state.pending_question = None
 
     # ═══════════════════════════════════════════════════════════════
     # HEADER
     # ═══════════════════════════════════════════════════════════════
 
     st.markdown("### 🤖 AI Analytics Assistant")
-    st.caption("Ask questions about your campaign performance in natural language")
+    st.caption("Have a conversation about your campaign performance. Ask follow-up questions to dive deeper.")
 
     # ═══════════════════════════════════════════════════════════════
-    # QUICK QUESTIONS - Organized in tabs by category with distinct colors
+    # QUICK QUESTIONS - Collapsed by default when there's history
     # ═══════════════════════════════════════════════════════════════
 
-    # Category definitions with colors
     question_categories = {
         "🔍 Diagnostics": {
-            "color": "#EF4444",  # Red
+            "color": "#EF4444",
             "bg": "rgba(239, 68, 68, 0.12)",
-            "hover_bg": "#EF4444",
             "questions": [
                 "Why did CPA change this week?",
                 "What's driving performance changes?",
                 "Why is conversion rate dropping?",
-                "What caused the spike in spend?",
-                "Why are impressions down this period?",
-                "What's affecting click-through rate?",
             ],
         },
         "📊 Comparison": {
-            "color": "#3B82F6",  # Blue
+            "color": "#3B82F6",
             "bg": "rgba(59, 130, 246, 0.12)",
-            "hover_bg": "#3B82F6",
             "questions": [
                 "Which platform has the best ROAS?",
                 "Compare Google Ads vs Meta",
                 "Which geo is performing best?",
-                "What's the best performing ad type?",
-                "Compare campaign objectives by CPA",
-                "Which creative type converts best?",
             ],
         },
         "📈 Forecasting": {
-            "color": "#F59E0B",  # Amber
+            "color": "#F59E0B",
             "bg": "rgba(245, 158, 11, 0.12)",
-            "hover_bg": "#F59E0B",
             "questions": [
                 "What's the conversion trend?",
                 "Predict next week's performance",
-                "What's the spend trend looking like?",
-                "Project ROAS for next period",
                 "How will CPA trend next week?",
-                "Forecast revenue for coming days",
             ],
         },
         "💡 Recommendations": {
-            "color": "#10B981",  # Emerald
+            "color": "#10B981",
             "bg": "rgba(16, 185, 129, 0.12)",
-            "hover_bg": "#10B981",
             "questions": [
                 "Should I reallocate budget?",
                 "Where should I increase spend?",
-                "Which campaigns should I pause?",
                 "How can I improve ROAS?",
-                "What budget changes would help CPA?",
-                "Which platform deserves more investment?",
-            ],
-        },
-        "📋 Data Lookup": {
-            "color": "#06B6D4",  # Cyan
-            "bg": "rgba(6, 182, 212, 0.12)",
-            "hover_bg": "#06B6D4",
-            "questions": [
-                "What was total spend this week?",
-                "How many conversions did we get?",
-                "What's the current CPA?",
-                "Show me revenue by platform",
-                "What's our overall ROAS?",
-                "How much did we spend on Meta?",
             ],
         },
     }
 
-    with st.expander("📋 Quick Questions (click to expand)", expanded=not st.session_state.ai_response):
-        # Use tabs for categories
+    # Show quick questions only when starting fresh or collapsed
+    has_history = len(st.session_state.chat_history) > 0
+    with st.expander("💬 Quick Start Questions", expanded=not has_history):
         q_tabs = st.tabs(list(question_categories.keys()))
-
         for tab_idx, (tab, (category, cat_data)) in enumerate(zip(q_tabs, question_categories.items())):
             with tab:
-                color = cat_data["color"]
-                bg = cat_data["bg"]
-                questions = cat_data["questions"]
-
-                # Display questions in 3 columns for better use of space
-                q_col1, q_col2, q_col3 = st.columns(3)
-                cols = [q_col1, q_col2, q_col3]
-
-                for i, q in enumerate(questions):
+                cols = st.columns(3)
+                for i, q in enumerate(cat_data["questions"]):
                     with cols[i % 3]:
-                        btn_key = f"q_{tab_idx}_{i}"
-                        if st.button(q, key=btn_key, use_container_width=True):
-                            st.session_state.ai_query = q
-                            st.session_state.ai_response = None
-
-                # Apply category-specific styling via CSS injection
-                safe_category = category.replace(" ", "_").replace("🔍", "diag").replace("📊", "comp").replace("📈", "fore").replace("💡", "reco").replace("📋", "look")
-                st.markdown(f"""
-                <style>
-                    div[data-testid="stTabs"] div[data-baseweb="tab-panel"]:nth-child({tab_idx + 2}) button {{
-                        background: {bg} !important;
-                        border: 1px solid {color}44 !important;
-                        color: {color} !important;
-                        font-weight: 500 !important;
-                    }}
-                    div[data-testid="stTabs"] div[data-baseweb="tab-panel"]:nth-child({tab_idx + 2}) button:hover {{
-                        background: {color} !important;
-                        border-color: {color} !important;
-                        color: white !important;
-                    }}
-                </style>
-                """, unsafe_allow_html=True)
+                        if st.button(q, key=f"quick_{tab_idx}_{i}", use_container_width=True):
+                            st.session_state.pending_question = q
+                            st.rerun()
 
     # ═══════════════════════════════════════════════════════════════
-    # INPUT AREA - Form-based to prevent unwanted reruns
+    # CONVERSATION HISTORY DISPLAY
+    # ═══════════════════════════════════════════════════════════════
+
+    if has_history:
+        # Clear conversation button
+        col1, col2, col3 = st.columns([1, 3, 1])
+        with col3:
+            if st.button("🗑️ Clear Chat", use_container_width=True):
+                st.session_state.chat_history = []
+                st.session_state.pending_question = None
+                st.rerun()
+
+        st.markdown("---")
+
+        # Display conversation history
+        for idx, turn in enumerate(st.session_state.chat_history):
+            # User question
+            st.markdown(f"""
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
+                <div style="background: #3B82F6; color: white; padding: 12px 16px; border-radius: 16px 16px 4px 16px; max-width: 80%; font-size: 14px;">
+                    {turn['question']}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # AI response with intent badge
+            intent = turn.get('intent', 'general')
+            intent_colors = {
+                'diagnostic': '#EF4444', 'comparison': '#3B82F6', 'forecast': '#F59E0B',
+                'scenario': '#8B5CF6', 'recommendation': '#10B981', 'lookup': '#6B7280', 'general': '#6366F1',
+            }
+            intent_labels = {
+                'diagnostic': '🔍 Diagnostic', 'comparison': '📊 Comparison', 'forecast': '📈 Forecast',
+                'scenario': '🎯 Scenario', 'recommendation': '💡 Recommendation', 'lookup': '📋 Lookup', 'general': '💬 Response',
+            }
+
+            # Format the response with markdown support
+            response_html = turn['answer'].replace('\n', '<br>').replace('**', '<strong>').replace('*', '<em>')
+
+            st.markdown(f"""
+            <div style="display: flex; justify-content: flex-start; margin-bottom: 20px;">
+                <div style="background: #1A1D29; border: 1px solid #374151; padding: 16px 20px; border-radius: 4px 16px 16px 16px; max-width: 95%;">
+                    <span style="background: {intent_colors.get(intent, '#6366F1')}22; color: {intent_colors.get(intent, '#6366F1')};
+                                 padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 600; margin-bottom: 8px; display: inline-block;">
+                        {intent_labels.get(intent, 'Response')}
+                    </span>
+                    <div style="font-size: 14px; color: #E5E7EB; line-height: 1.8; margin-top: 8px; white-space: pre-wrap;">{turn['answer']}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Show visualization for forecasts
+            if intent == 'forecast' and turn.get('analysis', {}).get('projection'):
+                proj = turn['analysis']
+                if proj.get('historical', {}).get('dates'):
+                    with st.container():
+                        hist_df = pd.DataFrame({
+                            'period': proj['historical']['dates'],
+                            proj['metric']: proj['historical']['values']
+                        })
+                        projection_data = {
+                            'dates': proj['projection']['dates'],
+                            'values': proj['projection']['values'],
+                            'lower_bound': proj['projection'].get('lower_bound', []),
+                            'upper_bound': proj['projection'].get('upper_bound', []),
+                        }
+                        fig = create_trend_chart(
+                            hist_df, x_col='period', y_col=proj['metric'],
+                            title=f"{proj['metric'].upper()} Trend & Projection",
+                            show_projection=True, projection_data=projection_data
+                        )
+                        st.plotly_chart(fig, use_container_width=True, key=f"chart_{idx}")
+
+            # Show comparison table
+            elif intent == 'comparison' and turn.get('analysis', {}).get('breakdown'):
+                breakdown = turn['analysis']['breakdown']
+                if len(breakdown) > 0:
+                    with st.expander("📊 View Detailed Data", expanded=False):
+                        df = pd.DataFrame(breakdown)
+                        if 'spend' in df.columns:
+                            df['Spend'] = df['spend'].apply(lambda x: format_inr(x))
+                        if 'cpa' in df.columns:
+                            df['CPA'] = df['cpa'].apply(lambda x: format_inr(x))
+                        if 'roas' in df.columns:
+                            df['ROAS'] = df['roas'].apply(lambda x: f"{x:.2f}x")
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+
+    # ═══════════════════════════════════════════════════════════════
+    # PROCESS PENDING QUESTION
+    # ═══════════════════════════════════════════════════════════════
+
+    if st.session_state.pending_question:
+        question = st.session_state.pending_question
+        st.session_state.pending_question = None
+
+        # Show the question being processed
+        st.markdown(f"""
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
+            <div style="background: #3B82F6; color: white; padding: 12px 16px; border-radius: 16px 16px 4px 16px; max-width: 80%; font-size: 14px;">
+                {question}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Process with conversation history context
+        with st.spinner("🔍 Analyzing your data and considering conversation context..."):
+            try:
+                # Build conversation history for context
+                history_for_llm = [
+                    {
+                        'question': turn['question'],
+                        'answer_summary': turn['answer'][:500] if len(turn['answer']) > 500 else turn['answer'],
+                    }
+                    for turn in st.session_state.chat_history[-5:]  # Last 5 turns
+                ]
+
+                result = query_router.process_query(
+                    user_question=question,
+                    filters=filters,
+                    conversation_history=history_for_llm if history_for_llm else None
+                )
+
+                # Add to conversation history
+                st.session_state.chat_history.append({
+                    'question': question,
+                    'answer': result['explanation'],
+                    'intent': result['intent'],
+                    'analysis': result.get('analysis', {}),
+                })
+
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Error processing question: {str(e)}")
+
+    # ═══════════════════════════════════════════════════════════════
+    # SUGGESTED FOLLOW-UPS (contextual based on last response)
+    # ═══════════════════════════════════════════════════════════════
+
+    if has_history:
+        last_intent = st.session_state.chat_history[-1].get('intent', 'general')
+
+        # Contextual follow-up suggestions based on last question type
+        follow_up_suggestions = {
+            'diagnostic': [
+                "What specific actions should I take?",
+                "Which platform should I focus on first?",
+                "How does this compare to last month?",
+            ],
+            'comparison': [
+                "Why is the winner performing better?",
+                "Should I shift budget to the best performer?",
+                "What's the trend for each platform?",
+            ],
+            'forecast': [
+                "What could change this projection?",
+                "How confident is this forecast?",
+                "What should I do to improve the outlook?",
+            ],
+            'recommendation': [
+                "What's the risk of this recommendation?",
+                "How much budget should I shift?",
+                "What results should I expect?",
+            ],
+            'lookup': [
+                "How does this compare to last week?",
+                "Break this down by platform",
+                "What's driving this number?",
+            ],
+            'general': [
+                "Tell me more about this",
+                "What should I do next?",
+                "What are the key takeaways?",
+            ],
+        }
+
+        suggestions = follow_up_suggestions.get(last_intent, follow_up_suggestions['general'])
+
+        st.markdown("---")
+        st.markdown("**💡 Suggested follow-ups:**")
+        cols = st.columns(3)
+        for idx, suggestion in enumerate(suggestions):
+            with cols[idx]:
+                if st.button(suggestion, key=f"followup_{idx}", use_container_width=True):
+                    st.session_state.pending_question = suggestion
+                    st.rerun()
+
+    # ═══════════════════════════════════════════════════════════════
+    # CHAT INPUT
     # ═══════════════════════════════════════════════════════════════
 
     st.markdown("---")
 
-    # Use a form to handle submission properly
-    with st.form(key="ai_query_form", clear_on_submit=False):
-        col1, col2 = st.columns([5, 1])
+    # Use chat_input for a more natural chat experience
+    user_input = st.chat_input(
+        placeholder="Ask a question about your campaign performance...",
+        key="chat_input"
+    )
 
-        with col1:
-            user_input = st.text_input(
-                "Your question",
-                value=st.session_state.ai_query,
-                placeholder="Type your question here or click a quick question above...",
-                label_visibility="collapsed",
-            )
-
-        with col2:
-            submit_button = st.form_submit_button("Ask AI", type="primary", use_container_width=True)
-
-    # Clear / New Question button
-    col_clear, col_spacer = st.columns([1, 5])
-    with col_clear:
-        if st.session_state.ai_response:
-            if st.button("🔄 New Question", use_container_width=True):
-                st.session_state.ai_response = None
-                st.session_state.ai_query = ""
-                st.rerun()
-
-    # ═══════════════════════════════════════════════════════════════
-    # PROCESS QUERY
-    # ═══════════════════════════════════════════════════════════════
-
-    query_to_run = user_input.strip() if submit_button and user_input.strip() else None
-
-    # Also process if ai_query was set by button click and no response yet
-    if not query_to_run and st.session_state.ai_query and not st.session_state.ai_response:
-        query_to_run = st.session_state.ai_query
-
-    if query_to_run:
-        st.session_state.ai_query = query_to_run  # Store the query
-
-        st.markdown("---")
-
-        # Show loading state prominently
-        with st.container():
-            st.markdown(f"**Your question:** {query_to_run}")
-
-            # Create a placeholder for the response
-            response_placeholder = st.empty()
-
-            with response_placeholder.container():
-                with st.spinner("🔍 Analyzing your data... This may take a few seconds."):
-                    try:
-                        result = query_router.process_query(
-                            user_question=query_to_run,
-                            filters=filters
-                        )
-                        st.session_state.ai_response = result
-                        st.rerun()  # Rerun to show the response properly
-
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
-                        st.session_state.ai_response = {'error': str(e)}
-
-    # ═══════════════════════════════════════════════════════════════
-    # DISPLAY RESPONSE
-    # ═══════════════════════════════════════════════════════════════
-
-    if st.session_state.ai_response and 'error' not in st.session_state.ai_response:
-        result = st.session_state.ai_response
-
-        st.markdown("---")
-
-        # Show the question that was asked
-        st.markdown(f"**Question:** {st.session_state.ai_query}")
-
-        # Intent badge
-        intent = result.get('intent', 'general')
-        intent_colors = {
-            'diagnostic': '#EF4444',
-            'comparison': '#3B82F6',
-            'forecast': '#F59E0B',
-            'scenario': '#8B5CF6',
-            'recommendation': '#10B981',
-            'lookup': '#6B7280',
-            'general': '#6366F1',
-        }
-        intent_labels = {
-            'diagnostic': '🔍 Diagnostic Analysis',
-            'comparison': '📊 Comparison',
-            'forecast': '📈 Forecast',
-            'scenario': '🎯 Scenario',
-            'recommendation': '💡 Recommendation',
-            'lookup': '📋 Lookup',
-            'general': '💬 Response',
-        }
-
-        st.markdown(f"""
-        <span style="background: {intent_colors.get(intent, '#6366F1')}22; color: {intent_colors.get(intent, '#6366F1')};
-                     padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600;">
-            {intent_labels.get(intent, 'Response')}
-        </span>
-        """, unsafe_allow_html=True)
-
-        st.markdown("")
-
-        # Main response in a styled container
-        st.markdown(f"""
-        <div style="background: #1A1D29; border: 1px solid #374151; border-radius: 8px; padding: 20px; margin: 10px 0;">
-            <div style="font-size: 15px; color: #E5E7EB; line-height: 1.7;">{result['explanation']}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Show visualization for forecasts
-        analysis = result.get('analysis', {})
-        if intent == 'forecast' and analysis.get('projection'):
-            proj = analysis
-            if proj.get('historical', {}).get('dates'):
-                hist_df = pd.DataFrame({
-                    'period': proj['historical']['dates'],
-                    proj['metric']: proj['historical']['values']
-                })
-
-                projection_data = {
-                    'dates': proj['projection']['dates'],
-                    'values': proj['projection']['values'],
-                    'lower_bound': proj['projection'].get('lower_bound', []),
-                    'upper_bound': proj['projection'].get('upper_bound', []),
-                }
-
-                fig = create_trend_chart(
-                    hist_df,
-                    x_col='period',
-                    y_col=proj['metric'],
-                    title=f"{proj['metric'].upper()} Trend & Projection",
-                    show_projection=True,
-                    projection_data=projection_data
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-        # Show comparison table for comparison intents
-        elif intent == 'comparison' and analysis.get('breakdown'):
-            breakdown = analysis['breakdown']
-            if len(breakdown) > 0:
-                with st.expander("📊 View Detailed Data", expanded=True):
-                    df = pd.DataFrame(breakdown)
-                    if 'spend' in df.columns:
-                        df['Spend'] = df['spend'].apply(lambda x: format_inr(x))
-                    if 'cpa' in df.columns:
-                        df['CPA'] = df['cpa'].apply(lambda x: format_inr(x))
-                    if 'roas' in df.columns:
-                        df['ROAS'] = df['roas'].apply(lambda x: f"{x:.2f}x")
-                    st.dataframe(df, use_container_width=True, hide_index=True)
-
-        # Follow-up questions
-        st.markdown("---")
-        st.markdown("**Ask a follow-up:**")
-        follow_cols = st.columns(3)
-
-        follow_ups = [
-            "Tell me more details",
-            "What should I do next?",
-            "Compare with last week"
-        ]
-
-        for idx, follow_up in enumerate(follow_ups):
-            with follow_cols[idx]:
-                if st.button(follow_up, key=f"follow_{idx}", use_container_width=True):
-                    st.session_state.ai_query = follow_up
-                    st.session_state.ai_response = None
-                    st.rerun()
+    if user_input:
+        st.session_state.pending_question = user_input
+        st.rerun()
 
 
 

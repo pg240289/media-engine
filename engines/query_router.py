@@ -66,6 +66,7 @@ class QueryRouter:
         self,
         user_question: str,
         filters: Optional[Dict[str, Any]] = None,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Process a natural language query
@@ -73,6 +74,7 @@ class QueryRouter:
         Args:
             user_question: The user's question
             filters: Optional filters already applied (platforms, geos, date range)
+            conversation_history: Optional list of previous Q&A pairs for context
 
         Returns:
             Dictionary with:
@@ -116,11 +118,12 @@ class QueryRouter:
             user_question
         )
 
-        # Step 5: Generate explanation
+        # Step 5: Generate explanation with conversation context
         explanation = self.llm.explain(
             query_type=intent,
             user_question=user_question,
-            analysis_data=analysis_data
+            analysis_data=analysis_data,
+            conversation_history=conversation_history
         )
 
         # Step 6: Determine visualization hint

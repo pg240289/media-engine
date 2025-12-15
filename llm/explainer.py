@@ -8,7 +8,7 @@ import os
 import json
 from typing import Optional, Dict, Any
 from anthropic import Anthropic
-from .prompts import SYSTEM_PROMPT, build_analysis_prompt, build_classification_prompt, build_entity_extraction_prompt
+from .prompts import SYSTEM_PROMPT, build_analysis_prompt, build_classification_prompt, build_entity_extraction_prompt, build_conversational_prompt
 from config import LLM_MODEL, LLM_MAX_TOKENS, LLM_TEMPERATURE
 
 
@@ -42,6 +42,7 @@ class LLMExplainer:
         query_type: str,
         user_question: str,
         analysis_data: Dict[str, Any],
+        conversation_history: list = None,
     ) -> str:
         """
         Generate a natural language explanation of analysis results
@@ -50,11 +51,18 @@ class LLMExplainer:
             query_type: Type of analysis (diagnostic, comparison, etc.)
             user_question: The user's original question
             analysis_data: Pre-computed analysis results (the LLM can ONLY use these numbers)
+            conversation_history: Optional list of previous Q&A pairs for context
 
         Returns:
             Natural language explanation grounded in the analysis data
         """
-        prompt = build_analysis_prompt(query_type, user_question, analysis_data)
+        # Use conversational prompt if there's history, otherwise use standard prompt
+        if conversation_history:
+            prompt = build_conversational_prompt(
+                query_type, user_question, analysis_data, conversation_history
+            )
+        else:
+            prompt = build_analysis_prompt(query_type, user_question, analysis_data)
 
         try:
             response = self.client.messages.create(
@@ -213,18 +221,23 @@ class MockLLMExplainer:
         query_type: str,
         user_question: str,
         analysis_data: Dict[str, Any],
+        conversation_history: list = None,
     ) -> str:
         """Generate mock explanation"""
+        context_note = ""
+        if conversation_history:
+            context_note = f"[Continuing conversation with {len(conversation_history)} previous exchanges] "
+
         if query_type == 'diagnostic':
-            return self._mock_diagnostic(analysis_data)
+            return context_note + self._mock_diagnostic(analysis_data)
         elif query_type == 'comparison':
-            return self._mock_comparison(analysis_data)
+            return context_note + self._mock_comparison(analysis_data)
         elif query_type == 'forecast':
-            return self._mock_forecast(analysis_data)
+            return context_note + self._mock_forecast(analysis_data)
         elif query_type == 'scenario':
-            return self._mock_scenario(analysis_data)
+            return context_note + self._mock_scenario(analysis_data)
         else:
-            return "Analysis complete. Please review the data in the dashboard."
+            return context_note + "Analysis complete. Please review the data in the dashboard."
 
     def classify_intent(self, user_question: str) -> str:
         """Simple keyword-based classification"""

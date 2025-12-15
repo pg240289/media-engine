@@ -101,8 +101,8 @@ DISPLAY_DATE_FORMAT = "%d %b %Y"
 
 # LLM Configuration
 LLM_MODEL = "claude-sonnet-4-20250514"  # Claude 4 Sonnet - latest fast model
-LLM_MAX_TOKENS = 1024
-LLM_TEMPERATURE = 0.3  # Lower for more consistent, factual responses
+LLM_MAX_TOKENS = 2048  # Increased for richer, more detailed insights
+LLM_TEMPERATURE = 0.4  # Slightly higher for more natural, engaging responses
 
 # Demo Questions (pre-configured for natural flow)
 DEMO_QUESTIONS = [
