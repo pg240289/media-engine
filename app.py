@@ -1280,70 +1280,6 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
     # Initialize session state for conversation history
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []  # List of {question, answer, intent, analysis_summary}
-    if 'pending_question' not in st.session_state:
-        st.session_state.pending_question = None
-    if 'ai_processing' not in st.session_state:
-        st.session_state.ai_processing = False
-
-    # ═══════════════════════════════════════════════════════════════
-    # PROCESS PENDING QUESTION FIRST (before any UI rendering)
-    # This ensures the processing happens immediately on rerun
-    # ═══════════════════════════════════════════════════════════════
-
-    if st.session_state.pending_question and not st.session_state.ai_processing:
-        st.session_state.ai_processing = True
-        question = st.session_state.pending_question
-        st.session_state.pending_question = None
-
-        # Show loading state with proper spacing
-        st.markdown("### 🤖 AI Analytics Assistant")
-        st.markdown("---")
-
-        # Show the question being processed
-        st.markdown(f"""
-        <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
-            <div style="background: #3B82F6; color: white; padding: 12px 16px; border-radius: 16px 16px 4px 16px; max-width: 80%; font-size: 14px;">
-                {question}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Process with conversation history context
-        with st.spinner("🔍 Analyzing your data and generating insights..."):
-            try:
-                # Build conversation history for context
-                history_for_llm = [
-                    {
-                        'question': turn['question'],
-                        'answer_summary': turn['answer'][:500] if len(turn['answer']) > 500 else turn['answer'],
-                    }
-                    for turn in st.session_state.chat_history[-5:]  # Last 5 turns
-                ]
-
-                result = query_router.process_query(
-                    user_question=question,
-                    filters=filters,
-                    conversation_history=history_for_llm if history_for_llm else None
-                )
-
-                # Add to conversation history
-                st.session_state.chat_history.append({
-                    'question': question,
-                    'answer': result['explanation'],
-                    'intent': result['intent'],
-                    'analysis': result.get('analysis', {}),
-                })
-
-            except Exception as e:
-                st.session_state.chat_history.append({
-                    'question': question,
-                    'answer': f"I encountered an error while processing your question: {str(e)}. Please try rephrasing or ask a different question.",
-                    'intent': 'general',
-                    'analysis': {},
-                })
-
-        st.session_state.ai_processing = False
-        st.rerun()
 
     # ═══════════════════════════════════════════════════════════════
     # HEADER
@@ -1353,64 +1289,118 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
     st.caption("Have a conversation about your campaign performance. Ask follow-up questions to dive deeper.")
 
     # ═══════════════════════════════════════════════════════════════
+    # CHAT INPUT AT TOP - More prominent placement
+    # ═══════════════════════════════════════════════════════════════
+
+    # Use text_input instead of chat_input to avoid rerun issues
+    col_input, col_btn = st.columns([5, 1])
+    with col_input:
+        user_input = st.text_input(
+            "Ask a question",
+            placeholder="Ask about your campaign performance...",
+            key="ask_input",
+            label_visibility="collapsed"
+        )
+    with col_btn:
+        submit_btn = st.button("Ask →", key="ask_submit", use_container_width=True, type="primary")
+
+    # Track the question to process
+    question_to_process = None
+
+    # Check if user submitted via button or enter key
+    if submit_btn and user_input:
+        question_to_process = user_input
+    elif user_input and st.session_state.get('last_input') != user_input:
+        # User typed something new and hit enter
+        st.session_state.last_input = user_input
+        question_to_process = user_input
+
+    # ═══════════════════════════════════════════════════════════════
     # QUICK QUESTIONS - Collapsed by default when there's history
     # ═══════════════════════════════════════════════════════════════
 
     question_categories = {
-        "🔍 Diagnostics": {
-            "color": "#EF4444",
-            "bg": "rgba(239, 68, 68, 0.12)",
-            "questions": [
-                "Why did CPA change this week?",
-                "What's driving performance changes?",
-                "Why is conversion rate dropping?",
-            ],
-        },
-        "📊 Comparison": {
-            "color": "#3B82F6",
-            "bg": "rgba(59, 130, 246, 0.12)",
-            "questions": [
-                "Which platform has the best ROAS?",
-                "Compare Google Ads vs Meta",
-                "Which geo is performing best?",
-            ],
-        },
-        "📈 Forecasting": {
-            "color": "#F59E0B",
-            "bg": "rgba(245, 158, 11, 0.12)",
-            "questions": [
-                "What's the conversion trend?",
-                "Predict next week's performance",
-                "How will CPA trend next week?",
-            ],
-        },
-        "💡 Recommendations": {
-            "color": "#10B981",
-            "bg": "rgba(16, 185, 129, 0.12)",
-            "questions": [
-                "Should I reallocate budget?",
-                "Where should I increase spend?",
-                "How can I improve ROAS?",
-            ],
-        },
+        "🔍 Diagnostics": [
+            "Why did CPA change this week?",
+            "What's driving performance changes?",
+            "Why is conversion rate dropping?",
+        ],
+        "📊 Comparison": [
+            "Which platform has the best ROAS?",
+            "Compare Google Ads vs Meta",
+            "Which geo is performing best?",
+        ],
+        "📈 Forecasting": [
+            "What's the conversion trend?",
+            "Predict next week's performance",
+            "How will CPA trend next week?",
+        ],
+        "💡 Recommendations": [
+            "Should I reallocate budget?",
+            "Where should I increase spend?",
+            "How can I improve ROAS?",
+        ],
     }
 
-    # Show quick questions only when starting fresh or collapsed
     has_history = len(st.session_state.chat_history) > 0
+
     with st.expander("💬 Quick Start Questions", expanded=not has_history):
         q_tabs = st.tabs(list(question_categories.keys()))
-        for tab_idx, (tab, (category, cat_data)) in enumerate(zip(q_tabs, question_categories.items())):
+        for tab_idx, (tab, (category, questions)) in enumerate(zip(q_tabs, question_categories.items())):
             with tab:
                 cols = st.columns(3)
-                for i, q in enumerate(cat_data["questions"]):
+                for i, q in enumerate(questions):
                     with cols[i % 3]:
                         if st.button(q, key=f"quick_{tab_idx}_{i}", use_container_width=True):
-                            st.session_state.pending_question = q
-                            st.rerun()
+                            question_to_process = q
+
+    # ═══════════════════════════════════════════════════════════════
+    # PROCESS QUESTION INLINE (No st.rerun!)
+    # ═══════════════════════════════════════════════════════════════
+
+    if question_to_process:
+        # Show processing indicator
+        with st.spinner("🔄 Analyzing your question..."):
+            try:
+                # Build conversation history for context
+                conversation_history = [
+                    {
+                        'question': turn['question'],
+                        'answer_summary': turn['answer'][:500] if len(turn['answer']) > 500 else turn['answer']
+                    }
+                    for turn in st.session_state.chat_history[-5:]
+                ]
+
+                # Process the question
+                result = query_router.route_and_process(
+                    user_question=question_to_process,
+                    start_date=filters['start_date'],
+                    end_date=filters['end_date'],
+                    platforms=filters['platforms'],
+                    geos=filters['geos'],
+                    conversation_history=conversation_history
+                )
+
+                # Add to chat history
+                st.session_state.chat_history.append({
+                    'question': question_to_process,
+                    'answer': result.get('explanation', 'Analysis complete.'),
+                    'intent': result.get('query_type', 'general'),
+                    'analysis': result.get('analysis', {}),
+                })
+
+                # Clear the input
+                st.session_state.last_input = None
+
+            except Exception as e:
+                st.error(f"Error processing question: {str(e)}")
 
     # ═══════════════════════════════════════════════════════════════
     # CONVERSATION HISTORY DISPLAY
     # ═══════════════════════════════════════════════════════════════
+
+    # Refresh has_history after potential new addition
+    has_history = len(st.session_state.chat_history) > 0
 
     if has_history:
         # Clear conversation button
@@ -1418,17 +1408,23 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
         with col3:
             if st.button("🗑️ Clear Chat", use_container_width=True):
                 st.session_state.chat_history = []
-                st.session_state.pending_question = None
-                st.rerun()
+                st.session_state.last_input = None
 
         st.markdown("---")
 
-        # Display conversation history
+        # Display conversation history with improved UI
         for idx, turn in enumerate(st.session_state.chat_history):
-            # User question
+            # User question bubble - right aligned
             st.markdown(f"""
-            <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
-                <div style="background: #3B82F6; color: white; padding: 12px 16px; border-radius: 16px 16px 4px 16px; max-width: 80%; font-size: 14px;">
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 16px;">
+                <div style="background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
+                            color: white;
+                            padding: 14px 20px;
+                            border-radius: 20px 20px 6px 20px;
+                            max-width: 70%;
+                            font-size: 15px;
+                            font-weight: 500;
+                            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);">
                     {turn['question']}
                 </div>
             </div>
@@ -1444,21 +1440,38 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
                 'diagnostic': '🔍 Diagnostic', 'comparison': '📊 Comparison', 'forecast': '📈 Forecast',
                 'scenario': '🎯 Scenario', 'recommendation': '💡 Recommendation', 'lookup': '📋 Lookup', 'general': '💬 Response',
             }
+            intent_color = intent_colors.get(intent, '#6366F1')
+            intent_label = intent_labels.get(intent, '💬 Response')
 
-            # Format the response with markdown support
-            response_html = turn['answer'].replace('\n', '<br>').replace('**', '<strong>').replace('*', '<em>')
-
-            st.markdown(f"""
-            <div style="display: flex; justify-content: flex-start; margin-bottom: 20px;">
-                <div style="background: #1A1D29; border: 1px solid #374151; padding: 16px 20px; border-radius: 4px 16px 16px 16px; max-width: 95%;">
-                    <span style="background: {intent_colors.get(intent, '#6366F1')}22; color: {intent_colors.get(intent, '#6366F1')};
-                                 padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 600; margin-bottom: 8px; display: inline-block;">
-                        {intent_labels.get(intent, 'Response')}
+            # Use st.container for better markdown rendering
+            with st.container():
+                # Intent badge
+                st.markdown(f"""
+                <div style="margin-bottom: 8px;">
+                    <span style="background: {intent_color}20;
+                                 color: {intent_color};
+                                 padding: 4px 12px;
+                                 border-radius: 12px;
+                                 font-size: 12px;
+                                 font-weight: 600;
+                                 border: 1px solid {intent_color}40;">
+                        {intent_label}
                     </span>
-                    <div style="font-size: 14px; color: #E5E7EB; line-height: 1.8; margin-top: 8px; white-space: pre-wrap;">{turn['answer']}</div>
                 </div>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
+
+                # AI response in a styled container - use native markdown for better formatting
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #1E1E2E 0%, #1A1A2A 100%);
+                            border: 1px solid #333344;
+                            border-left: 4px solid {intent_color};
+                            padding: 20px 24px;
+                            border-radius: 4px 16px 16px 16px;
+                            margin-bottom: 24px;
+                            box-shadow: 0 4px 16px rgba(0,0,0,0.2);">
+                    <div style="font-size: 14px; color: #E5E7EB; line-height: 1.9; white-space: pre-wrap;">{turn['answer']}</div>
+                </div>
+                """, unsafe_allow_html=True)
 
             # Show visualization for forecasts
             if intent == 'forecast' and turn.get('analysis', {}).get('projection'):
@@ -1545,24 +1558,34 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
         for idx, suggestion in enumerate(suggestions):
             with cols[idx]:
                 if st.button(suggestion, key=f"followup_{idx}", use_container_width=True):
-                    st.session_state.pending_question = suggestion
-                    st.rerun()
+                    # Process follow-up inline
+                    with st.spinner("🔄 Analyzing..."):
+                        try:
+                            conversation_history = [
+                                {
+                                    'question': turn['question'],
+                                    'answer_summary': turn['answer'][:500] if len(turn['answer']) > 500 else turn['answer']
+                                }
+                                for turn in st.session_state.chat_history[-5:]
+                            ]
 
-    # ═══════════════════════════════════════════════════════════════
-    # CHAT INPUT
-    # ═══════════════════════════════════════════════════════════════
+                            result = query_router.route_and_process(
+                                user_question=suggestion,
+                                start_date=filters['start_date'],
+                                end_date=filters['end_date'],
+                                platforms=filters['platforms'],
+                                geos=filters['geos'],
+                                conversation_history=conversation_history
+                            )
 
-    st.markdown("---")
-
-    # Use chat_input for a more natural chat experience
-    user_input = st.chat_input(
-        placeholder="Ask a question about your campaign performance...",
-        key="chat_input"
-    )
-
-    if user_input:
-        st.session_state.pending_question = user_input
-        st.rerun()
+                            st.session_state.chat_history.append({
+                                'question': suggestion,
+                                'answer': result.get('explanation', 'Analysis complete.'),
+                                'intent': result.get('query_type', 'general'),
+                                'analysis': result.get('analysis', {}),
+                            })
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
 
 
 
