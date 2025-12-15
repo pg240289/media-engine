@@ -1372,12 +1372,9 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
                 ]
 
                 # Process the question
-                result = query_router.route_and_process(
+                result = query_router.process_query(
                     user_question=question_to_process,
-                    start_date=filters['start_date'],
-                    end_date=filters['end_date'],
-                    platforms=filters['platforms'],
-                    geos=filters['geos'],
+                    filters=filters,
                     conversation_history=conversation_history
                 )
 
@@ -1385,7 +1382,7 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
                 st.session_state.chat_history.append({
                     'question': question_to_process,
                     'answer': result.get('explanation', 'Analysis complete.'),
-                    'intent': result.get('query_type', 'general'),
+                    'intent': result.get('intent', 'general'),
                     'analysis': result.get('analysis', {}),
                 })
 
@@ -1569,19 +1566,16 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
                                 for turn in st.session_state.chat_history[-5:]
                             ]
 
-                            result = query_router.route_and_process(
+                            result = query_router.process_query(
                                 user_question=suggestion,
-                                start_date=filters['start_date'],
-                                end_date=filters['end_date'],
-                                platforms=filters['platforms'],
-                                geos=filters['geos'],
+                                filters=filters,
                                 conversation_history=conversation_history
                             )
 
                             st.session_state.chat_history.append({
                                 'question': suggestion,
                                 'answer': result.get('explanation', 'Analysis complete.'),
-                                'intent': result.get('query_type', 'general'),
+                                'intent': result.get('intent', 'general'),
                                 'analysis': result.get('analysis', {}),
                             })
                         except Exception as e:
