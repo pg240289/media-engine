@@ -1279,7 +1279,7 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
 
     # Initialize session state for conversation history
     if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []  # List of {question, answer, intent, analysis_summary}
+        st.session_state.chat_history = []
 
     # ═══════════════════════════════════════════════════════════════
     # HEADER
@@ -1288,11 +1288,15 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
     st.markdown("### 🤖 AI Analytics Assistant")
     st.caption("Have a conversation about your campaign performance. Ask follow-up questions to dive deeper.")
 
+    # Show any error from processing
+    if 'chat_error' in st.session_state and st.session_state.chat_error:
+        st.error(f"Error processing question: {st.session_state.chat_error}")
+        st.session_state.chat_error = None
+
     # ═══════════════════════════════════════════════════════════════
-    # CHAT INPUT AT TOP - More prominent placement
+    # CHAT INPUT AT TOP
     # ═══════════════════════════════════════════════════════════════
 
-    # Use text_input instead of chat_input to avoid rerun issues
     col_input, col_btn = st.columns([5, 1])
     with col_input:
         user_input = st.text_input(
@@ -1304,19 +1308,13 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
     with col_btn:
         submit_btn = st.button("Ask →", key="ask_submit", use_container_width=True, type="primary")
 
-    # Track the question to process
-    question_to_process = None
-
-    # Check if user submitted via button or enter key
+    # Handle question submission - queue for processing and rerun
     if submit_btn and user_input:
-        question_to_process = user_input
-    elif user_input and st.session_state.get('last_input') != user_input:
-        # User typed something new and hit enter
-        st.session_state.last_input = user_input
-        question_to_process = user_input
+        st.session_state.pending_question = user_input
+        st.rerun()
 
     # ═══════════════════════════════════════════════════════════════
-    # QUICK QUESTIONS - Collapsed by default when there's history
+    # QUICK QUESTIONS
     # ═══════════════════════════════════════════════════════════════
 
     question_categories = {
@@ -1352,45 +1350,8 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
                 for i, q in enumerate(questions):
                     with cols[i % 3]:
                         if st.button(q, key=f"quick_{tab_idx}_{i}", use_container_width=True):
-                            question_to_process = q
-
-    # ═══════════════════════════════════════════════════════════════
-    # PROCESS QUESTION INLINE (No st.rerun!)
-    # ═══════════════════════════════════════════════════════════════
-
-    if question_to_process:
-        # Show processing indicator
-        with st.spinner("🔄 Analyzing your question..."):
-            try:
-                # Build conversation history for context
-                conversation_history = [
-                    {
-                        'question': turn['question'],
-                        'answer_summary': turn['answer'][:500] if len(turn['answer']) > 500 else turn['answer']
-                    }
-                    for turn in st.session_state.chat_history[-5:]
-                ]
-
-                # Process the question
-                result = query_router.process_query(
-                    user_question=question_to_process,
-                    filters=filters,
-                    conversation_history=conversation_history
-                )
-
-                # Add to chat history
-                st.session_state.chat_history.append({
-                    'question': question_to_process,
-                    'answer': result.get('explanation', 'Analysis complete.'),
-                    'intent': result.get('intent', 'general'),
-                    'analysis': result.get('analysis', {}),
-                })
-
-                # Clear the input
-                st.session_state.last_input = None
-
-            except Exception as e:
-                st.error(f"Error processing question: {str(e)}")
+                            st.session_state.pending_question = q
+                            st.rerun()
 
     # ═══════════════════════════════════════════════════════════════
     # CONVERSATION HISTORY DISPLAY
@@ -1547,31 +1508,8 @@ def render_ask_platform(query_router: QueryRouter, filters: dict):
         for idx, suggestion in enumerate(suggestions):
             with cols[idx]:
                 if st.button(suggestion, key=f"followup_{idx}", use_container_width=True):
-                    # Process follow-up inline
-                    with st.spinner("🔄 Analyzing..."):
-                        try:
-                            conversation_history = [
-                                {
-                                    'question': turn['question'],
-                                    'answer_summary': turn['answer'][:500] if len(turn['answer']) > 500 else turn['answer']
-                                }
-                                for turn in st.session_state.chat_history[-5:]
-                            ]
-
-                            result = query_router.process_query(
-                                user_question=suggestion,
-                                filters=filters,
-                                conversation_history=conversation_history
-                            )
-
-                            st.session_state.chat_history.append({
-                                'question': suggestion,
-                                'answer': result.get('explanation', 'Analysis complete.'),
-                                'intent': result.get('intent', 'general'),
-                                'analysis': result.get('analysis', {}),
-                            })
-                        except Exception as e:
-                            st.error(f"Error: {str(e)}")
+                    st.session_state.pending_question = suggestion
+                    st.rerun()
 
 
 
@@ -2012,6 +1950,45 @@ def main():
         llm_api_key=api_key,
         use_mock_llm=use_mock
     )
+
+    # ═══════════════════════════════════════════════════════════════
+    # PROCESS PENDING AI QUESTION BEFORE RENDERING TABS
+    # This ensures the question is processed before any UI is rendered
+    # ═══════════════════════════════════════════════════════════════
+    if 'pending_question' in st.session_state and st.session_state.pending_question:
+        question = st.session_state.pending_question
+        st.session_state.pending_question = None  # Clear immediately
+
+        # Initialize chat history if needed
+        if 'chat_history' not in st.session_state:
+            st.session_state.chat_history = []
+
+        # Build conversation history for context
+        conversation_history = [
+            {
+                'question': turn['question'],
+                'answer_summary': turn['answer'][:500] if len(turn['answer']) > 500 else turn['answer']
+            }
+            for turn in st.session_state.chat_history[-5:]
+        ]
+
+        try:
+            # Process the question
+            result = query_router.process_query(
+                user_question=question,
+                filters=filters,
+                conversation_history=conversation_history
+            )
+
+            # Add to chat history
+            st.session_state.chat_history.append({
+                'question': question,
+                'answer': result.get('explanation', 'Analysis complete.'),
+                'intent': result.get('intent', 'general'),
+                'analysis': result.get('analysis', {}),
+            })
+        except Exception as e:
+            st.session_state.chat_error = str(e)
 
     # Main content tabs
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
